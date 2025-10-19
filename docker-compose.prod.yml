@@ -1,0 +1,104 @@
+version: '3.8'
+
+services:
+  # MySQL 数据库 - 生产环境配置
+  mysql:
+    image: mysql:8.0
+    container_name: cosf-mysql-prod
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-your_secure_password}
+      MYSQL_DATABASE: cosf
+      MYSQL_CHARACTER_SET_SERVER: utf8mb4
+      MYSQL_COLLATION_SERVER: utf8mb4_unicode_ci
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data_prod:/var/lib/mysql
+      - ./mysql/my.cnf:/etc/mysql/conf.d/my.cnf:ro
+    networks:
+      - cosf-network
+    restart: always
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+        reservations:
+          memory: 512M
+
+  # Redis 缓存 - 生产环境配置
+  redis:
+    image: redis:7-alpine
+    container_name: cosf-redis-prod
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data_prod:/data
+      - ./redis/redis.conf:/usr/local/etc/redis/redis.conf:ro
+    command: redis-server /usr/local/etc/redis/redis.conf
+    networks:
+      - cosf-network
+    restart: always
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 256M
+
+  # CosF 应用 - 生产环境配置
+  cosf:
+    build: .
+    container_name: cosf-app-prod
+    ports:
+      - "8000:8000"  # gRPC 端口
+      - "8080:8080"  # HTTP 端口
+    environment:
+      - GRPC_GO_LOG_VERBOSITY_LEVEL=${GRPC_GO_LOG_VERBOSITY_LEVEL:-99}
+      - GRPC_GO_LOG_SEVERITY_LEVEL=${GRPC_GO_LOG_SEVERITY_LEVEL:-info}
+      - MYSQL_DSN=${MYSQL_DSN:-root:${MYSQL_ROOT_PASSWORD:-your_secure_password}@tcp(mysql:3306)/cosf?charset=utf8mb4&parseTime=True&loc=Local}
+      - REDIS_ADDR=${REDIS_ADDR:-redis:6379}
+    depends_on:
+      - mysql
+      - redis
+    networks:
+      - cosf-network
+    restart: always
+    volumes:
+      - ./logs:/app/logs
+    deploy:
+      replicas: 2
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.5'
+        reservations:
+          memory: 256M
+          cpus: '0.25'
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+
+  # Nginx 反向代理（可选）
+  nginx:
+    image: nginx:alpine
+    container_name: cosf-nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/ssl:/etc/nginx/ssl:ro
+    depends_on:
+      - cosf
+    networks:
+      - cosf-network
+    restart: always
+
+volumes:
+  mysql_data_prod:
+  redis_data_prod:
+
+networks:
+  cosf-network:
+    driver: bridge

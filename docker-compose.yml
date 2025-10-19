@@ -1,0 +1,59 @@
+version: '3.8'
+
+services:
+  # MySQL 数据库
+  mysql:
+    image: mysql:8.0
+    container_name: cosf-mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: 123456
+      MYSQL_DATABASE: cosf
+      MYSQL_CHARACTER_SET_SERVER: utf8mb4
+      MYSQL_COLLATION_SERVER: utf8mb4_unicode_ci
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    networks:
+      - cosf-network
+    restart: unless-stopped
+
+  # Redis 缓存
+  redis:
+    image: redis:7-alpine
+    container_name: cosf-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - cosf-network
+    restart: unless-stopped
+
+  # CosF 应用
+  cosf:
+    build: .
+    container_name: cosf-app
+    ports:
+      - "8000:8000"  # gRPC 端口
+      - "8080:8080"  # HTTP 端口
+    environment:
+      - GRPC_GO_LOG_VERBOSITY_LEVEL=99
+      - GRPC_GO_LOG_SEVERITY_LEVEL=info
+    depends_on:
+      - mysql
+      - redis
+    networks:
+      - cosf-network
+    restart: unless-stopped
+    volumes:
+      - ./logs:/app/logs
+
+volumes:
+  mysql_data:
+  redis_data:
+
+networks:
+  cosf-network:
+    driver: bridge

@@ -1,0 +1,44 @@
+# Git 相关
+.git
+.gitignore
+
+# 日志文件
+logs/
+*.log
+
+# 临时文件
+tmp/
+temp/
+
+# IDE 文件
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# 操作系统文件
+.DS_Store
+Thumbs.db
+
+# 测试文件
+*_test.go
+test_*
+
+# 文档
+README.md
+*.md
+
+# 构建产物
+main
+cosf
+
+# 依赖目录
+vendor/
+
+# 环境文件
+.env
+.env.local
+.env.*.local
+
+# 其他
+googleapis/
