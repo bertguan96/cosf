@@ -2,12 +2,12 @@ package service
 
 import (
 	"context"
-
+	"encoding/json"
 	"errors"
+	"strconv"
 	"time"
 
 	"github.com/bertguan96/cosf/common"
-	mysql "github.com/bertguan96/cosf/common"
 	pb "github.com/bertguan96/cosf/cosf"
 	"github.com/bertguan96/cosf/model"
 )
@@ -20,7 +20,7 @@ func NewCosfService() *CosfService {
 }
 
 func (s *CosfService) AllocateQPS(ctx context.Context, request *pb.AllocateQPSRequest) (*pb.AllocateQPSResponseData, error) {
-	db := mysql.GetMysql()
+	db := common.GetMysql()
 	// 获取当前桶的情况
 	bucket := model.CosfBucket{}
 	if err := db.Model(&model.CosfBucket{}).Where("bucket_id = ?", request.BucketId).First(&bucket).Error; err != nil {
@@ -55,34 +55,60 @@ func (s *CosfService) AllocateQPS(ctx context.Context, request *pb.AllocateQPSRe
 		return nil, errors.New("region qps exceed, please try again later.")
 	}
 
-	// 尝试多种时间格式解析
+	// ExpireAt是时间戳，需要解析为时间
 	var expireAt time.Time
 	var err error
-
-	// 首先尝试RFC3339格式
-	expireAt, err = time.Parse(time.RFC3339, request.ExpireAt)
-	if err != nil {
-		// 如果失败，尝试RFC3339Nano格式
-		expireAt, err = time.Parse(time.RFC3339Nano, request.ExpireAt)
-		if err != nil {
-			// 如果还是失败，尝试ISO8601格式（只有Z没有时区偏移）
-			expireAt, err = time.Parse("2006-01-02T15:04:05Z", request.ExpireAt)
+	// 首先尝试解析为Unix时间戳（秒）
+	if timestamp, parseErr := strconv.ParseInt(request.ExpireAt, 10, 64); parseErr == nil {
+		expireAt = time.Unix(timestamp, 0)
+	} else {
+		// 如果解析为秒级时间戳失败，尝试毫秒级时间戳
+		if timestamp, parseErr := strconv.ParseInt(request.ExpireAt, 10, 64); parseErr == nil {
+			expireAt = time.Unix(timestamp/1000, (timestamp%1000)*1000000)
+		} else {
+			// 如果都失败，尝试解析为RFC3339格式
+			expireAt, err = time.Parse(time.RFC3339, request.ExpireAt)
 			if err != nil {
-				return nil, errors.New("invalid expire at, " + err.Error())
+				// 最后尝试ISO8601格式（只有Z没有时区偏移）
+				expireAt, err = time.Parse("2006-01-02T15:04:05Z", request.ExpireAt)
+				if err != nil {
+					return nil, errors.New("invalid expire at, " + err.Error())
+				}
 			}
 		}
 	}
+	key := common.Generate10CharID()
 	newTask := model.CosfTask{
 		UserID:     request.UserId,
 		Qps:        int(request.Qps),
 		ExpireAt:   expireAt,
 		BucketID:   request.BucketId,
-		Key:        common.Generate10CharID(),
+		Key:        key,
 		BusinessID: request.BusinessId,
 	}
-	err = db.Create(&newTask).Error
-	if err != nil {
+
+	if err = db.Create(&newTask).Error; err != nil {
 		return nil, errors.New("create task failed")
+	}
+	// 结果写入redis
+	rds := common.GetRedis()
+	taskCfg, err := json.Marshal(&model.RdsTaskCfg{
+		Key:       key,
+		ExpireAt:  expireAt.Format(time.RFC3339),
+		UserId:    request.UserId,
+		Bucket:    request.BucketId,
+		Region:    bucket.Region,
+		SecretKey: bucket.SecretKey,
+		AccessKey: bucket.AccessKey,
+		Qps:       int64(newTask.Qps), // 记录qps
+	})
+	if err != nil {
+		db.Model(&model.CosfTask{}).Where("key = ?", key).Delete(&model.CosfTask{}) // 失败需要删除
+		return nil, errors.New("marshal task failed")
+	}
+	if err = rds.Set(ctx, key, taskCfg, time.Until(expireAt)).Err(); err != nil {
+		db.Model(&model.CosfTask{}).Where("key = ?", key).Delete(&model.CosfTask{}) // 失败需要删除
+		return nil, errors.New("set task cfg failed, " + err.Error())
 	}
 
 	resp := &pb.AllocateQPSResponseData{

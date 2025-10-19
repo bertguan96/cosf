@@ -17,7 +17,6 @@ import (
 func init() {
 	common.InitLogger()
 	common.InitDB()
-	common.InitCos()
 }
 
 func main() {

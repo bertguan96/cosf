@@ -1,9 +1,10 @@
 package common
 
 import (
+	"context"
+	"io"
 	"net/http"
 	"net/url"
-	"os"
 
 	"github.com/tencentyun/cos-go-sdk-v5"
 	"google.golang.org/grpc/grpclog"
@@ -11,12 +12,7 @@ import (
 
 var Client *cos.Client
 
-func initCos() *cos.Client {
-	secretID := os.Getenv("COS_SECRET_ID")
-	secretKey := os.Getenv("COS_SECRET_KEY")
-	bucket := os.Getenv("COS_BUCKET")
-	region := os.Getenv("COS_REGION")
-
+func InitCos(secretID, secretKey, bucket, region string) *cos.Client {
 	u, _ := url.Parse("https://" + bucket + ".cos." + region + ".myqcloud.com")
 	baseURL := &cos.BaseURL{BucketURL: u}
 	Client = cos.NewClient(baseURL, &http.Client{
@@ -29,20 +25,15 @@ func initCos() *cos.Client {
 	return Client
 }
 
-func InitCos() {
-	once.Do(func() {
-		Client = initCos()
-	})
-	grpclog.Info("COS connected successfully")
-}
-
-func GetCosClient() *cos.Client {
-	// 如果CLient端开
-	if Client == nil {
-		once.Do(func() {
-			Client = initCos()
-		})
-		grpclog.Info("COS reconnected successfully")
+func Download(ctx context.Context, client *cos.Client, key string) (string, error) {
+	resp, err := client.Object.Get(ctx, key, nil)
+	if err != nil {
+		return "", err
 	}
-	return Client
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	return string(body), nil
 }
