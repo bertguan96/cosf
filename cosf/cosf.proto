@@ -1,0 +1,75 @@
+syntax = "proto3";
+
+package cosf;
+
+import "google/api/annotations.proto";
+
+option go_package = "github.com/bertguan96/cosf/cosf";
+
+message BaseResponse {
+    int32 code = 1;
+    string message = 2;
+}
+
+
+message AllocateQPSRequest {
+    string user_id = 1;
+    int64 qps = 2;
+    string expire_at = 3;
+    string bucket_id = 4; // 可选，如果为空，则根据当前bucket查询可以授权的
+    string business_id = 5; // 可选，如果为空，则根据当前bucket查询可以授权的
+}
+
+message AllocateQPSResponseData {
+    string key = 1;
+    int64 qps = 2;
+    string expire_at = 3;
+}
+
+message AllocateQPSResponse {
+    BaseResponse base = 1;
+    AllocateQPSResponseData data = 2;
+}
+
+
+message HealthCheckRequest {
+    // 健康检查请求，通常为空
+}
+
+message HealthCheckResponse {
+    BaseResponse base = 1;
+}
+
+message DownloadRequest {
+    string key = 1;
+    string cos_key = 2;
+    string bucket_id = 3;
+}
+
+message DownloadResponse {
+    BaseResponse base = 1;
+    string content = 2;
+}
+
+service CosfService {
+    // HealthCheck 健康检查
+    rpc HealthCheck(HealthCheckRequest) returns (HealthCheckResponse) {
+        option (google.api.http) = {
+            get: "/cosf/healthCheck"
+        };
+    };
+    // AllocateQPS 申请QPS 
+    rpc AllocateQPS(AllocateQPSRequest) returns (AllocateQPSResponse) {
+        option (google.api.http) = {
+            post: "/cosf/allocateQPS"
+            body: "*"
+        };
+    };
+    // Download 下载文件
+    rpc Download(DownloadRequest) returns (DownloadResponse) {
+        option (google.api.http) = {
+            post: "/cosf/download"
+            body: "*"
+        };
+    };
+}
